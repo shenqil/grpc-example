@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"log"
 	"time"
 
@@ -21,7 +22,10 @@ func main() {
 	defer conn.Close()
 	c := pb.NewGreeterClient(conn)
 
-	unaryCallWithMetadata(c)
+	// unaryCallWithMetadata(c)
+	// serverStreamingWithMetadata(c)
+	// clientStreamWithMetadata(c)
+	bidirectionalWithMetadata(c)
 }
 
 func unaryCallWithMetadata(c pb.GreeterClient) {
@@ -66,4 +70,206 @@ func unaryCallWithMetadata(c pb.GreeterClient) {
 	} else {
 		log.Fatal("需要timestamp，但header中不存在timestamp")
 	}
+}
+
+func serverStreamingWithMetadata(c pb.GreeterClient) {
+	fmt.Printf("--- server streaming ---\n")
+
+	// 创建metadata到context中.
+	md := metadata.Pairs("timestamp", time.Now().Format(time.StampNano))
+	ctx := metadata.NewOutgoingContext(context.Background(), md)
+
+	stream, err := c.ServerStreamingEcho(ctx, &pb.HelloRequest{Name: "serverStreamingWithMetadata"})
+	if err != nil {
+		log.Fatalf("调用ServerStreamingEcho失败: %v", err)
+	}
+
+	header, err := stream.Header()
+	if err != nil {
+		log.Fatalf("无法从stream中获取header: %v", err)
+	}
+
+	if t, ok := header["timestamp"]; ok {
+		fmt.Printf("timestamp from header:\n")
+		for i, e := range t {
+			fmt.Printf(" %d. %s\n", i, e)
+		}
+	} else {
+		log.Fatal("需要timestamp，但header中不存在timestamp")
+	}
+
+	if l, ok := header["location"]; ok {
+		fmt.Printf("location from header:\n")
+		for i, e := range l {
+			fmt.Printf(" %d. %s\n", i, e)
+		}
+	} else {
+		log.Fatal("需要location，但是header中不存在location")
+	}
+
+	// 读取所有的responses
+	fmt.Printf("response:\n")
+	var rpcStatus error
+	for {
+		r, err := stream.Recv()
+		if err != nil {
+			rpcStatus = err
+			break
+		}
+
+		fmt.Printf(" - %s\n", r.Message)
+	}
+
+	if rpcStatus != io.EOF {
+		log.Fatalf("failed to finish server streaming: %v", rpcStatus)
+	}
+
+	trailer := stream.Trailer()
+
+	if t, ok := trailer["timestamp"]; ok {
+		fmt.Printf("timestamp from trailer:\n")
+		for i, e := range t {
+			fmt.Printf(" %d. %s\n", i, e)
+		}
+	} else {
+		log.Fatal("需要timestamp，但header中不存在timestamp")
+	}
+}
+
+func clientStreamWithMetadata(c pb.GreeterClient) {
+	fmt.Printf("--- client streaming ---\n")
+	// Create metadata and context.
+	md := metadata.Pairs("timestamp", time.Now().Format(time.StampNano))
+	ctx := metadata.NewOutgoingContext(context.Background(), md)
+
+	// Make RPC using the context with the metadata.
+	stream, err := c.ClientStreamingEcho(ctx)
+	if err != nil {
+		log.Fatalf("ClientStreamingEcho 调用失败: %v\n", err)
+	}
+
+	// Read the header when the header arrives.
+	header, err := stream.Header()
+	if err != nil {
+		log.Fatalf("failed to get header from stream: %v", err)
+	}
+	// Read metadata from server's header.
+	if t, ok := header["timestamp"]; ok {
+		fmt.Printf("timestamp from header:\n")
+		for i, e := range t {
+			fmt.Printf(" %d. %s\n", i, e)
+		}
+	} else {
+		log.Fatal("timestamp expected but doesn't exist in header")
+	}
+
+	if l, ok := header["location"]; ok {
+		fmt.Printf("location from header:\n")
+		for i, e := range l {
+			fmt.Printf(" %d. %s\n", i, e)
+		}
+	} else {
+		log.Fatal("location expected but doesn't exist in header")
+	}
+
+	// Send all requests to the server.
+	for i := 0; i < 10; i++ {
+		if err := stream.Send(&pb.HelloRequest{Name: "clientStreamWithMetadata"}); err != nil {
+			log.Fatalf("failed to send streaming: %v\n", err)
+		}
+	}
+
+	// Read the response.
+	r, err := stream.CloseAndRecv()
+	if err != nil {
+		log.Fatalf("failed to CloseAndRecv: %v\n", err)
+	}
+	fmt.Printf("response:\n")
+	fmt.Printf(" - %s\n\n", r.Message)
+
+	// Read the trailer after the RPC is finished.
+	trailer := stream.Trailer()
+	// Read metadata from server's trailer.
+	if t, ok := trailer["timestamp"]; ok {
+		fmt.Printf("timestamp from trailer:\n")
+		for i, e := range t {
+			fmt.Printf(" %d. %s\n", i, e)
+		}
+	} else {
+		log.Fatal("timestamp expected but doesn't exist in trailer")
+	}
+}
+
+func bidirectionalWithMetadata(c pb.GreeterClient) {
+	fmt.Printf("--- bidirectional ---\n")
+	// Create metadata and context.
+	md := metadata.Pairs("timestamp", time.Now().Format(time.StampNano))
+	ctx := metadata.NewOutgoingContext(context.Background(), md)
+
+	// Make RPC using the context with the metadata.
+	stream, err := c.BidirectionalStreamingEcho(ctx)
+	if err != nil {
+		log.Fatalf("failed to call BidirectionalStreamingEcho: %v\n", err)
+	}
+
+	go func() {
+		// Read the header when the header arrives.
+		header, err := stream.Header()
+		if err != nil {
+			log.Fatalf("failed to get header from stream: %v", err)
+		}
+		// Read metadata from server's header.
+		if t, ok := header["timestamp"]; ok {
+			fmt.Printf("timestamp from header:\n")
+			for i, e := range t {
+				fmt.Printf(" %d. %s\n", i, e)
+			}
+		} else {
+			log.Fatal("timestamp expected but doesn't exist in header")
+		}
+		if l, ok := header["location"]; ok {
+			fmt.Printf("location from header:\n")
+			for i, e := range l {
+				fmt.Printf(" %d. %s\n", i, e)
+			}
+		} else {
+			log.Fatal("location expected but doesn't exist in header")
+		}
+
+		// Send all requests to the server.
+		for i := 0; i < 10; i++ {
+			if err := stream.Send(&pb.HelloRequest{Name: "clientStreamWithMetadata"}); err != nil {
+				log.Fatalf("failed to send streaming: %v\n", err)
+			}
+		}
+		stream.CloseSend()
+	}()
+
+	// Read all the responses.
+	var rpcStatus error
+	fmt.Printf("response:\n")
+	for {
+		r, err := stream.Recv()
+		if err != nil {
+			rpcStatus = err
+			break
+		}
+		fmt.Printf(" - %s\n", r.Message)
+	}
+	if rpcStatus != io.EOF {
+		log.Fatalf("failed to finish server streaming: %v", rpcStatus)
+	}
+
+	// Read the trailer after the RPC is finished.
+	trailer := stream.Trailer()
+	// Read metadata from server's trailer.
+	if t, ok := trailer["timestamp"]; ok {
+		fmt.Printf("timestamp from trailer:\n")
+		for i, e := range t {
+			fmt.Printf(" %d. %s\n", i, e)
+		}
+	} else {
+		log.Fatal("timestamp expected but doesn't exist in trailer")
+	}
+
 }
