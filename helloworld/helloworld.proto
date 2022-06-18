@@ -5,12 +5,13 @@ option go_package = "./helloworld";
 package helloworld;
 
 service Greeter {
+  // 普通调用
   rpc UnaryEcho (HelloRequest) returns (HelloReply) {}
-  // ServerStreamingEcho is server side streaming.
+  // 服务流调用
   rpc ServerStreamingEcho(HelloRequest) returns (stream HelloReply) {}
-  // ClientStreamingEcho is client side streaming.
+  // 客户端流调用
   rpc ClientStreamingEcho(stream HelloRequest) returns (HelloReply) {}
-  // BidirectionalStreamingEcho is bidi streaming.
+  // 双向流调用
   rpc BidirectionalStreamingEcho(stream HelloRequest) returns (stream HelloReply) {}
 }
 

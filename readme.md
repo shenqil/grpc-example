@@ -1,26 +1,8 @@
-# 1. golang环境处理
+# metadata 使用
 
-## 1.1. 安装[golang环境](https://golang.org/)
+# 1.修改 `helloworld.proto`
 
-## 1.2.下载 [protoc](https://github.com/protocolbuffers/protobuf/releases) 并且解压。然后将其添加到系统环境变量中
-
-## 1.3.下载协议编译器的Go 插件
-```
-go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.28
-go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.2
-```
-***
-
-# 2.开始helloworld项目
-## 2.1 `go mod init helloworld` 开启一个项目
-
-## 2.2 安装 `grpc` mod
-```
-go get google.golang.org/grpc
-```
-
-## 2.3 创建 `helloworld\helloworld.proto` 文件
-```
+```proto
 syntax = "proto3";
 
 option go_package = "./helloworld";
@@ -28,7 +10,14 @@ option go_package = "./helloworld";
 package helloworld;
 
 service Greeter {
-  rpc SayHello (HelloRequest) returns (HelloReply) {}
+  // 普通调用
+  rpc UnaryEcho (HelloRequest) returns (HelloReply) {}
+  // 服务流调用
+  rpc ServerStreamingEcho(HelloRequest) returns (stream HelloReply) {}
+  // 客户端流调用
+  rpc ClientStreamingEcho(stream HelloRequest) returns (HelloReply) {}
+  // 双向流调用
+  rpc BidirectionalStreamingEcho(stream HelloRequest) returns (stream HelloReply) {}
 }
 
 message HelloRequest {
@@ -40,86 +29,96 @@ message HelloReply {
 }
 ```
 
-## 2.4 编译 `.proto` 文件
-```
-protoc --go_out=. --go_opt=paths=source_relative  --go-grpc_out=. --go-grpc_opt=paths=source_relative  helloworld/helloworld.proto
-```
+***
 
-## 2.5 创建服务端文件 `server\main.go`
-```
-package main
+# 2.普通调用`metadata`数据使用
 
-import (
-	"context"
-	"log"
-	"net"
+## 2.1服务端代码
 
-	"google.golang.org/grpc"
+```go
+func (s *server) UnaryEcho(ctx context.Context, in *pb.HelloRequest) (*pb.HelloReply, error) {
+	fmt.Println("---UnaryEcho---")
 
-	pb "helloworld/helloworld"
-)
+	defer func() {
+		trailer := metadata.Pairs("timestamp", time.Now().Format(time.StampNano))
+		grpc.SetTrailer(ctx, trailer)
+	}()
 
-type server struct {
-	pb.UnimplementedGreeterServer
-}
+	md, ok := metadata.FromIncomingContext(ctx)
 
-func (s *server) SayHello(ctx context.Context, in *pb.HelloRequest) (*pb.HelloReply, error) {
+	if !ok {
+		return nil, status.Errorf(codes.DataLoss, "无法获取元数据")
+	}
+
+	if t, ok := md["timestamp"]; ok {
+		fmt.Println("timestamp from metadata:")
+		for i, e := range t {
+			fmt.Printf("%d.%s\n", i, e)
+		}
+	}
+
+	header := metadata.New(map[string]string{"location": "MTV", "timestamp": time.Now().Format(time.StampNano)})
+	grpc.SendHeader(ctx, header)
+
+	fmt.Printf("已接受到的请求:%v,发送响应\n", in)
+
 	return &pb.HelloReply{Message: "Hello again " + in.GetName()}, nil
 }
-
-func main() {
-
-	lis, err := net.Listen("tcp", ":50051")
-	if err != nil {
-		log.Fatalf("failed to listen: %v", err)
-	}
-
-	grpcServer := grpc.NewServer()
-	pb.RegisterGreeterServer(grpcServer, &server{})
-	log.Printf("server listening at %v", lis.Addr())
-
-	if err := grpcServer.Serve(lis); err != nil {
-		log.Fatalf("failed to serve: %v", err)
-	}
-}
 ```
 
-## 2.6 创建客户端文件`client\main.go`
-```
-package main
++ 1.在`defer`中调用`SetTrailer`;会在`grpc`关闭时在尾部添加`metadata`数据
 
-import (
-	"context"
-	"log"
-	"time"
++ 2.调用`FromIncomingContext`;从`context`中解析出`client`请求时携带的`metadata`数据
 
-	pb "helloworld/helloworld"
++ 3.`SendHeader`在响应头部添加`metadata`
 
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
-)
++ 4.返回数据到客户端
 
-func main() {
-	conn, err := grpc.Dial(":50051", grpc.WithTransportCredentials(insecure.NewCredentials()))
+## 2.2客户端代码
+```go
+	fmt.Println("--- unaryCall ---")
+
+	// 创建metadata到context中.
+	md := metadata.Pairs("timestamp", time.Now().Format(time.StampNano))
+	ctx := metadata.NewOutgoingContext(context.Background(), md)
+
+	// 使用metadata的上下文创建RPC
+	var header, trailer metadata.MD
+	r, err := c.UnaryEcho(ctx, &pb.HelloRequest{Name: "unaryCall"}, grpc.Header(&header), grpc.Trailer(&trailer))
 	if err != nil {
-		log.Fatalf("did not connect: %v", err)
-	}
-	defer conn.Close()
-	c := pb.NewGreeterClient(conn)
-
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
-
-	r, err := c.SayHello(ctx, &pb.HelloRequest{Name: "hello"})
-	if err != nil {
-		log.Fatalf("could not greet: %v", err)
+		log.Fatalf("调用UnaryEcho失败:%v", err)
 	}
 
-	log.Printf("Greeting: %s", r.GetMessage())
-}
+	if t, ok := header["timestamp"]; ok {
+		fmt.Printf("timestamp from header:\n")
+		for i, e := range t {
+			fmt.Printf("%d.%s\n", i, e)
+		}
+	} else {
+		log.Fatal("需要timestamp，但header中不存在timestamp")
+	}
+
+	if l, ok := header["location"]; ok {
+		fmt.Printf("location from header:\n")
+		for i, e := range l {
+			fmt.Printf(" %d. %s\n", i, e)
+		}
+	} else {
+		log.Fatal("需要location，但是header中不存在location")
+	}
+	fmt.Println("response:")
+	fmt.Printf(" - %s\n", r.Message)
+
+	if t, ok := trailer["timestamp"]; ok {
+		fmt.Printf("timestamp from trailer:\n")
+		for i, e := range t {
+			fmt.Printf(" %d. %s\n", i, e)
+		}
+	} else {
+		log.Fatal("需要timestamp，但header中不存在timestamp")
+	}
 ```
 
-# 总结
-+ `go run main.go` 分别启动服务端和客户端，grpc 环境以及helloworld完成
++ 1.`NewOutgoingContext` 将创建的`metadata`数据放入`context`中，在`rpc`调用时通过`context`将携带的`metadata`发送给服务端
 
-[源码](https://github.com/shenqil/grpc-example)
++ 2.创建`header`和`trailer`用于`rpc`调用完成后，得到服务端返回的`metadata`数据,`header`是服务端刚开始调用时填充的数据,`trailer`是服务端调用完成后填充的数据
