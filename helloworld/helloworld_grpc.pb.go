@@ -2,7 +2,7 @@
 // versions:
 // - protoc-gen-go-grpc v1.2.0
 // - protoc             v3.20.1
-// source: helloworld/helloworld.proto
+// source: helloworld.proto
 
 package helloworld
 
@@ -22,7 +22,13 @@ const _ = grpc.SupportPackageIsVersion7
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type GreeterClient interface {
-	SayHello(ctx context.Context, in *HelloRequest, opts ...grpc.CallOption) (*HelloReply, error)
+	UnaryEcho(ctx context.Context, in *HelloRequest, opts ...grpc.CallOption) (*HelloReply, error)
+	// ServerStreamingEcho is server side streaming.
+	ServerStreamingEcho(ctx context.Context, in *HelloRequest, opts ...grpc.CallOption) (Greeter_ServerStreamingEchoClient, error)
+	// ClientStreamingEcho is client side streaming.
+	ClientStreamingEcho(ctx context.Context, opts ...grpc.CallOption) (Greeter_ClientStreamingEchoClient, error)
+	// BidirectionalStreamingEcho is bidi streaming.
+	BidirectionalStreamingEcho(ctx context.Context, opts ...grpc.CallOption) (Greeter_BidirectionalStreamingEchoClient, error)
 }
 
 type greeterClient struct {
@@ -33,20 +39,123 @@ func NewGreeterClient(cc grpc.ClientConnInterface) GreeterClient {
 	return &greeterClient{cc}
 }
 
-func (c *greeterClient) SayHello(ctx context.Context, in *HelloRequest, opts ...grpc.CallOption) (*HelloReply, error) {
+func (c *greeterClient) UnaryEcho(ctx context.Context, in *HelloRequest, opts ...grpc.CallOption) (*HelloReply, error) {
 	out := new(HelloReply)
-	err := c.cc.Invoke(ctx, "/helloworld.Greeter/SayHello", in, out, opts...)
+	err := c.cc.Invoke(ctx, "/helloworld.Greeter/UnaryEcho", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
+func (c *greeterClient) ServerStreamingEcho(ctx context.Context, in *HelloRequest, opts ...grpc.CallOption) (Greeter_ServerStreamingEchoClient, error) {
+	stream, err := c.cc.NewStream(ctx, &Greeter_ServiceDesc.Streams[0], "/helloworld.Greeter/ServerStreamingEcho", opts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &greeterServerStreamingEchoClient{stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+type Greeter_ServerStreamingEchoClient interface {
+	Recv() (*HelloReply, error)
+	grpc.ClientStream
+}
+
+type greeterServerStreamingEchoClient struct {
+	grpc.ClientStream
+}
+
+func (x *greeterServerStreamingEchoClient) Recv() (*HelloReply, error) {
+	m := new(HelloReply)
+	if err := x.ClientStream.RecvMsg(m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
+func (c *greeterClient) ClientStreamingEcho(ctx context.Context, opts ...grpc.CallOption) (Greeter_ClientStreamingEchoClient, error) {
+	stream, err := c.cc.NewStream(ctx, &Greeter_ServiceDesc.Streams[1], "/helloworld.Greeter/ClientStreamingEcho", opts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &greeterClientStreamingEchoClient{stream}
+	return x, nil
+}
+
+type Greeter_ClientStreamingEchoClient interface {
+	Send(*HelloRequest) error
+	CloseAndRecv() (*HelloReply, error)
+	grpc.ClientStream
+}
+
+type greeterClientStreamingEchoClient struct {
+	grpc.ClientStream
+}
+
+func (x *greeterClientStreamingEchoClient) Send(m *HelloRequest) error {
+	return x.ClientStream.SendMsg(m)
+}
+
+func (x *greeterClientStreamingEchoClient) CloseAndRecv() (*HelloReply, error) {
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	m := new(HelloReply)
+	if err := x.ClientStream.RecvMsg(m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
+func (c *greeterClient) BidirectionalStreamingEcho(ctx context.Context, opts ...grpc.CallOption) (Greeter_BidirectionalStreamingEchoClient, error) {
+	stream, err := c.cc.NewStream(ctx, &Greeter_ServiceDesc.Streams[2], "/helloworld.Greeter/BidirectionalStreamingEcho", opts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &greeterBidirectionalStreamingEchoClient{stream}
+	return x, nil
+}
+
+type Greeter_BidirectionalStreamingEchoClient interface {
+	Send(*HelloRequest) error
+	Recv() (*HelloReply, error)
+	grpc.ClientStream
+}
+
+type greeterBidirectionalStreamingEchoClient struct {
+	grpc.ClientStream
+}
+
+func (x *greeterBidirectionalStreamingEchoClient) Send(m *HelloRequest) error {
+	return x.ClientStream.SendMsg(m)
+}
+
+func (x *greeterBidirectionalStreamingEchoClient) Recv() (*HelloReply, error) {
+	m := new(HelloReply)
+	if err := x.ClientStream.RecvMsg(m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
 // GreeterServer is the server API for Greeter service.
 // All implementations must embed UnimplementedGreeterServer
 // for forward compatibility
 type GreeterServer interface {
-	SayHello(context.Context, *HelloRequest) (*HelloReply, error)
+	UnaryEcho(context.Context, *HelloRequest) (*HelloReply, error)
+	// ServerStreamingEcho is server side streaming.
+	ServerStreamingEcho(*HelloRequest, Greeter_ServerStreamingEchoServer) error
+	// ClientStreamingEcho is client side streaming.
+	ClientStreamingEcho(Greeter_ClientStreamingEchoServer) error
+	// BidirectionalStreamingEcho is bidi streaming.
+	BidirectionalStreamingEcho(Greeter_BidirectionalStreamingEchoServer) error
 	mustEmbedUnimplementedGreeterServer()
 }
 
@@ -54,8 +163,17 @@ type GreeterServer interface {
 type UnimplementedGreeterServer struct {
 }
 
-func (UnimplementedGreeterServer) SayHello(context.Context, *HelloRequest) (*HelloReply, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method SayHello not implemented")
+func (UnimplementedGreeterServer) UnaryEcho(context.Context, *HelloRequest) (*HelloReply, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method UnaryEcho not implemented")
+}
+func (UnimplementedGreeterServer) ServerStreamingEcho(*HelloRequest, Greeter_ServerStreamingEchoServer) error {
+	return status.Errorf(codes.Unimplemented, "method ServerStreamingEcho not implemented")
+}
+func (UnimplementedGreeterServer) ClientStreamingEcho(Greeter_ClientStreamingEchoServer) error {
+	return status.Errorf(codes.Unimplemented, "method ClientStreamingEcho not implemented")
+}
+func (UnimplementedGreeterServer) BidirectionalStreamingEcho(Greeter_BidirectionalStreamingEchoServer) error {
+	return status.Errorf(codes.Unimplemented, "method BidirectionalStreamingEcho not implemented")
 }
 func (UnimplementedGreeterServer) mustEmbedUnimplementedGreeterServer() {}
 
@@ -70,22 +188,95 @@ func RegisterGreeterServer(s grpc.ServiceRegistrar, srv GreeterServer) {
 	s.RegisterService(&Greeter_ServiceDesc, srv)
 }
 
-func _Greeter_SayHello_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+func _Greeter_UnaryEcho_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(HelloRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(GreeterServer).SayHello(ctx, in)
+		return srv.(GreeterServer).UnaryEcho(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/helloworld.Greeter/SayHello",
+		FullMethod: "/helloworld.Greeter/UnaryEcho",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(GreeterServer).SayHello(ctx, req.(*HelloRequest))
+		return srv.(GreeterServer).UnaryEcho(ctx, req.(*HelloRequest))
 	}
 	return interceptor(ctx, in, info, handler)
+}
+
+func _Greeter_ServerStreamingEcho_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(HelloRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(GreeterServer).ServerStreamingEcho(m, &greeterServerStreamingEchoServer{stream})
+}
+
+type Greeter_ServerStreamingEchoServer interface {
+	Send(*HelloReply) error
+	grpc.ServerStream
+}
+
+type greeterServerStreamingEchoServer struct {
+	grpc.ServerStream
+}
+
+func (x *greeterServerStreamingEchoServer) Send(m *HelloReply) error {
+	return x.ServerStream.SendMsg(m)
+}
+
+func _Greeter_ClientStreamingEcho_Handler(srv interface{}, stream grpc.ServerStream) error {
+	return srv.(GreeterServer).ClientStreamingEcho(&greeterClientStreamingEchoServer{stream})
+}
+
+type Greeter_ClientStreamingEchoServer interface {
+	SendAndClose(*HelloReply) error
+	Recv() (*HelloRequest, error)
+	grpc.ServerStream
+}
+
+type greeterClientStreamingEchoServer struct {
+	grpc.ServerStream
+}
+
+func (x *greeterClientStreamingEchoServer) SendAndClose(m *HelloReply) error {
+	return x.ServerStream.SendMsg(m)
+}
+
+func (x *greeterClientStreamingEchoServer) Recv() (*HelloRequest, error) {
+	m := new(HelloRequest)
+	if err := x.ServerStream.RecvMsg(m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
+func _Greeter_BidirectionalStreamingEcho_Handler(srv interface{}, stream grpc.ServerStream) error {
+	return srv.(GreeterServer).BidirectionalStreamingEcho(&greeterBidirectionalStreamingEchoServer{stream})
+}
+
+type Greeter_BidirectionalStreamingEchoServer interface {
+	Send(*HelloReply) error
+	Recv() (*HelloRequest, error)
+	grpc.ServerStream
+}
+
+type greeterBidirectionalStreamingEchoServer struct {
+	grpc.ServerStream
+}
+
+func (x *greeterBidirectionalStreamingEchoServer) Send(m *HelloReply) error {
+	return x.ServerStream.SendMsg(m)
+}
+
+func (x *greeterBidirectionalStreamingEchoServer) Recv() (*HelloRequest, error) {
+	m := new(HelloRequest)
+	if err := x.ServerStream.RecvMsg(m); err != nil {
+		return nil, err
+	}
+	return m, nil
 }
 
 // Greeter_ServiceDesc is the grpc.ServiceDesc for Greeter service.
@@ -96,10 +287,27 @@ var Greeter_ServiceDesc = grpc.ServiceDesc{
 	HandlerType: (*GreeterServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{
-			MethodName: "SayHello",
-			Handler:    _Greeter_SayHello_Handler,
+			MethodName: "UnaryEcho",
+			Handler:    _Greeter_UnaryEcho_Handler,
 		},
 	},
-	Streams:  []grpc.StreamDesc{},
-	Metadata: "helloworld/helloworld.proto",
+	Streams: []grpc.StreamDesc{
+		{
+			StreamName:    "ServerStreamingEcho",
+			Handler:       _Greeter_ServerStreamingEcho_Handler,
+			ServerStreams: true,
+		},
+		{
+			StreamName:    "ClientStreamingEcho",
+			Handler:       _Greeter_ClientStreamingEcho_Handler,
+			ClientStreams: true,
+		},
+		{
+			StreamName:    "BidirectionalStreamingEcho",
+			Handler:       _Greeter_BidirectionalStreamingEcho_Handler,
+			ServerStreams: true,
+			ClientStreams: true,
+		},
+	},
+	Metadata: "helloworld.proto",
 }

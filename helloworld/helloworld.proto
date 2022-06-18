@@ -5,7 +5,13 @@ option go_package = "./helloworld";
 package helloworld;
 
 service Greeter {
-  rpc SayHello (HelloRequest) returns (HelloReply) {}
+  rpc UnaryEcho (HelloRequest) returns (HelloReply) {}
+  // ServerStreamingEcho is server side streaming.
+  rpc ServerStreamingEcho(HelloRequest) returns (stream HelloReply) {}
+  // ClientStreamingEcho is client side streaming.
+  rpc ClientStreamingEcho(stream HelloRequest) returns (HelloReply) {}
+  // BidirectionalStreamingEcho is bidi streaming.
+  rpc BidirectionalStreamingEcho(stream HelloRequest) returns (stream HelloReply) {}
 }
 
 message HelloRequest {
