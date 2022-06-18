@@ -527,4 +527,4 @@ func bidirectionalWithMetadata(c pb.GreeterClient) {
 
 + 6. 客户端处理服务端发送的`stream`的返回后，调用`stream.Trailer()`,拿到最后放在`Trailer`的`metadata`
 
-[源码]()
+[源码](https://github.com/shenqil/grpc-example/tree/metadata)
