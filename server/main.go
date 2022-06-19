@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
@@ -22,27 +23,6 @@ type server struct {
 
 func (s *server) UnaryEcho(ctx context.Context, in *pb.HelloRequest) (*pb.HelloReply, error) {
 	fmt.Println("---UnaryEcho---")
-
-	defer func() {
-		trailer := metadata.Pairs("timestamp", time.Now().Format(time.StampNano))
-		grpc.SetTrailer(ctx, trailer)
-	}()
-
-	md, ok := metadata.FromIncomingContext(ctx)
-
-	if !ok {
-		return nil, status.Errorf(codes.DataLoss, "无法获取元数据")
-	}
-
-	if t, ok := md["timestamp"]; ok {
-		fmt.Println("timestamp from metadata:")
-		for i, e := range t {
-			fmt.Printf("%d.%s\n", i, e)
-		}
-	}
-
-	header := metadata.New(map[string]string{"location": "MTV", "timestamp": time.Now().Format(time.StampNano)})
-	grpc.SendHeader(ctx, header)
 
 	fmt.Printf("已接受到的请求:%v,发送响应\n", in)
 
@@ -163,6 +143,45 @@ func (s *server) BidirectionalStreamingEcho(stream pb.Greeter_BidirectionalStrea
 	}
 }
 
+func unaryInterceptor(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
+	fmt.Println("---unaryInterceptor---")
+
+	// 解析请求携带的信息
+	str, _ := json.Marshal(req)
+	fmt.Printf("req: %s\n", str)
+	fmt.Printf("Method: %s\n", info.FullMethod)
+
+	defer func() {
+		trailer := metadata.Pairs("timestamp", time.Now().Format(time.StampNano))
+		grpc.SetTrailer(ctx, trailer)
+	}()
+
+	// 解析请求的metadata
+	md, ok := metadata.FromIncomingContext(ctx)
+
+	if !ok {
+		return nil, status.Errorf(codes.DataLoss, "无法获取元数据")
+	}
+
+	if t, ok := md["timestamp"]; ok {
+		fmt.Println("timestamp from metadata:")
+		for i, e := range t {
+			fmt.Printf("%d.%s\n", i, e)
+		}
+	}
+
+	// 创建携带metadata的Header
+	header := metadata.New(map[string]string{"location": "MTV", "timestamp": time.Now().Format(time.StampNano)})
+	grpc.SendHeader(ctx, header)
+
+	// 方法调用
+	m, err := handler(ctx, req)
+	if err != nil {
+		fmt.Printf("RPC failed with error %v", err)
+	}
+	return m, err
+}
+
 func main() {
 
 	lis, err := net.Listen("tcp", ":50051")
@@ -170,7 +189,7 @@ func main() {
 		log.Fatalf("failed to listen: %v", err)
 	}
 
-	grpcServer := grpc.NewServer()
+	grpcServer := grpc.NewServer(grpc.UnaryInterceptor(unaryInterceptor))
 	pb.RegisterGreeterServer(grpcServer, &server{})
 	log.Printf("server listening at %v", lis.Addr())
 

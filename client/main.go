@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
@@ -15,61 +16,35 @@ import (
 )
 
 func main() {
-	conn, err := grpc.Dial(":50051", grpc.WithTransportCredentials(insecure.NewCredentials()))
+	conn, err := grpc.Dial(
+		":50051",
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithUnaryInterceptor(unaryInterceptor),
+	)
 	if err != nil {
 		log.Fatalf("did not connect: %v", err)
 	}
 	defer conn.Close()
 	c := pb.NewGreeterClient(conn)
 
-	// unaryCallWithMetadata(c)
+	unaryCallWithMetadata(c)
 	// serverStreamingWithMetadata(c)
 	// clientStreamWithMetadata(c)
-	bidirectionalWithMetadata(c)
+	// bidirectionalWithMetadata(c)
 }
 
 func unaryCallWithMetadata(c pb.GreeterClient) {
 	fmt.Println("--- unaryCall ---")
 
-	// 创建metadata到context中.
-	md := metadata.Pairs("timestamp", time.Now().Format(time.StampNano))
-	ctx := metadata.NewOutgoingContext(context.Background(), md)
-
 	// 使用metadata的上下文创建RPC
-	var header, trailer metadata.MD
-	r, err := c.UnaryEcho(ctx, &pb.HelloRequest{Name: "unaryCall"}, grpc.Header(&header), grpc.Trailer(&trailer))
+
+	r, err := c.UnaryEcho(context.Background(), &pb.HelloRequest{Name: "unaryCall"})
 	if err != nil {
 		log.Fatalf("调用UnaryEcho失败:%v", err)
 	}
 
-	if t, ok := header["timestamp"]; ok {
-		fmt.Printf("timestamp from header:\n")
-		for i, e := range t {
-			fmt.Printf("%d.%s\n", i, e)
-		}
-	} else {
-		log.Fatal("需要timestamp，但header中不存在timestamp")
-	}
-
-	if l, ok := header["location"]; ok {
-		fmt.Printf("location from header:\n")
-		for i, e := range l {
-			fmt.Printf(" %d. %s\n", i, e)
-		}
-	} else {
-		log.Fatal("需要location，但是header中不存在location")
-	}
 	fmt.Println("response:")
 	fmt.Printf(" - %s\n", r.Message)
-
-	if t, ok := trailer["timestamp"]; ok {
-		fmt.Printf("timestamp from trailer:\n")
-		for i, e := range t {
-			fmt.Printf(" %d. %s\n", i, e)
-		}
-	} else {
-		log.Fatal("需要timestamp，但header中不存在timestamp")
-	}
 }
 
 func serverStreamingWithMetadata(c pb.GreeterClient) {
@@ -271,5 +246,50 @@ func bidirectionalWithMetadata(c pb.GreeterClient) {
 	} else {
 		log.Fatal("timestamp expected but doesn't exist in trailer")
 	}
+}
 
+// unaryInterceptor is an example unary interceptor.
+func unaryInterceptor(ctx context.Context, method string, req, reply interface{}, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
+	fmt.Printf("---unaryInterceptor---\n")
+
+	// 创建metadata到context中.
+	md := metadata.Pairs("timestamp", time.Now().Format(time.StampNano))
+	ctx = metadata.NewOutgoingContext(ctx, md)
+
+	reqStr, _ := json.Marshal(req)
+	fmt.Printf("RPC: %s,req:%s\n", method, reqStr)
+
+	var header, trailer metadata.MD
+	opts = append(opts, grpc.Header(&header), grpc.Trailer(&trailer))
+
+	err := invoker(ctx, method, req, reply, cc, opts...)
+
+	if t, ok := header["timestamp"]; ok {
+		fmt.Printf("timestamp from header:\n")
+		for i, e := range t {
+			fmt.Printf("%d.%s\n", i, e)
+		}
+	} else {
+		log.Fatal("需要timestamp，但header中不存在timestamp")
+	}
+
+	if l, ok := header["location"]; ok {
+		fmt.Printf("location from header:\n")
+		for i, e := range l {
+			fmt.Printf(" %d. %s\n", i, e)
+		}
+	} else {
+		log.Fatal("需要location，但是header中不存在location")
+	}
+
+	if t, ok := trailer["timestamp"]; ok {
+		fmt.Printf("timestamp from trailer:\n")
+		for i, e := range t {
+			fmt.Printf(" %d. %s\n", i, e)
+		}
+	} else {
+		log.Fatal("需要timestamp，但header中不存在timestamp")
+	}
+
+	return err
 }
