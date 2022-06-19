@@ -32,25 +32,6 @@ func (s *server) UnaryEcho(ctx context.Context, in *pb.HelloRequest) (*pb.HelloR
 func (s *server) ServerStreamingEcho(in *pb.HelloRequest, stream pb.Greeter_ServerStreamingEchoServer) error {
 	fmt.Printf("--- ServerStreamingEcho ---\n")
 
-	defer func() {
-		trailer := metadata.Pairs("timestamp", time.Now().Format(time.StampNano))
-		stream.SetTrailer(trailer)
-	}()
-
-	md, ok := metadata.FromIncomingContext(stream.Context())
-	if !ok {
-		return status.Errorf(codes.DataLoss, "ServerStreamingEcho: 无法获取metadata")
-	}
-	if t, ok := md["timestamp"]; ok {
-		fmt.Printf("timestamp from metadata:\n")
-		for i, e := range t {
-			fmt.Printf("%d.%s\n", i, e)
-		}
-	}
-
-	header := metadata.New(map[string]string{"location": "MTV", "timestamp": time.Now().Format(time.StampNano)})
-	stream.SendHeader(header)
-
 	fmt.Printf("收到的请求: %v\n", in)
 
 	for i := 0; i < 10; i++ {
@@ -67,25 +48,6 @@ func (s *server) ServerStreamingEcho(in *pb.HelloRequest, stream pb.Greeter_Serv
 
 func (s *server) ClientStreamingEcho(stream pb.Greeter_ClientStreamingEchoServer) error {
 	fmt.Printf("--- ClientStreamingEcho ---\n")
-
-	defer func() {
-		trailer := metadata.Pairs("timestamp", time.Now().Format(time.StampNano))
-		stream.SetTrailer(trailer)
-	}()
-
-	md, ok := metadata.FromIncomingContext(stream.Context())
-	if !ok {
-		return status.Errorf(codes.DataLoss, "ClientStreamingEcho: failed to get metadata")
-	}
-	if t, ok := md["timestamp"]; ok {
-		fmt.Printf("timestamp from metadata:\n")
-		for i, e := range t {
-			fmt.Printf(" %d. %s\n", i, e)
-		}
-	}
-
-	header := metadata.New(map[string]string{"location": "MTV", "timestamp": time.Now().Format(time.StampNano)})
-	stream.SendHeader(header)
 
 	// Read requests and send responses.
 	for {
@@ -104,28 +66,6 @@ func (s *server) ClientStreamingEcho(stream pb.Greeter_ClientStreamingEchoServer
 
 func (s *server) BidirectionalStreamingEcho(stream pb.Greeter_BidirectionalStreamingEchoServer) error {
 	fmt.Printf("--- BidirectionalStreamingEcho ---\n")
-
-	defer func() {
-		trailer := metadata.Pairs("timestamp", time.Now().Format(time.StampNano))
-		stream.SetTrailer(trailer)
-	}()
-
-	// Read metadata from client.
-	md, ok := metadata.FromIncomingContext(stream.Context())
-	if !ok {
-		return status.Errorf(codes.DataLoss, "BidirectionalStreamingEcho: failed to get metadata")
-	}
-
-	if t, ok := md["timestamp"]; ok {
-		fmt.Printf("timestamp from metadata:\n")
-		for i, e := range t {
-			fmt.Printf(" %d. %s\n", i, e)
-		}
-	}
-
-	// Create and send header.
-	header := metadata.New(map[string]string{"location": "MTV", "timestamp": time.Now().Format(time.StampNano)})
-	stream.SendHeader(header)
 
 	// Read requests and send responses.
 	for {
@@ -182,6 +122,38 @@ func unaryInterceptor(ctx context.Context, req interface{}, info *grpc.UnaryServ
 	return m, err
 }
 
+func streamInterceptor(srv interface{}, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
+	fmt.Printf("--- streamInterceptor ---\n")
+
+	// 调用完成时设置SetTrailer
+	defer func() {
+		trailer := metadata.Pairs("timestamp", time.Now().Format(time.StampNano))
+		ss.SetTrailer(trailer)
+	}()
+
+	// 从Stream的Context中解析出metadata
+	md, ok := metadata.FromIncomingContext(ss.Context())
+	if !ok {
+		return status.Errorf(codes.DataLoss, "ServerStreamingEcho: 无法获取metadata")
+	}
+	if t, ok := md["timestamp"]; ok {
+		fmt.Printf("timestamp from metadata:\n")
+		for i, e := range t {
+			fmt.Printf("%d.%s\n", i, e)
+		}
+	}
+
+	// 设置Header里面的metadata
+	header := metadata.New(map[string]string{"location": "MTV", "timestamp": time.Now().Format(time.StampNano)})
+	ss.SendHeader(header)
+
+	err := handler(srv, ss)
+	if err != nil {
+		fmt.Printf("RPC failed with error %v", err)
+	}
+	return err
+}
+
 func main() {
 
 	lis, err := net.Listen("tcp", ":50051")
@@ -189,7 +161,7 @@ func main() {
 		log.Fatalf("failed to listen: %v", err)
 	}
 
-	grpcServer := grpc.NewServer(grpc.UnaryInterceptor(unaryInterceptor))
+	grpcServer := grpc.NewServer(grpc.UnaryInterceptor(unaryInterceptor), grpc.StreamInterceptor(streamInterceptor))
 	pb.RegisterGreeterServer(grpcServer, &server{})
 	log.Printf("server listening at %v", lis.Addr())
 
